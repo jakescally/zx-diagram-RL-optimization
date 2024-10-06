@@ -6,7 +6,7 @@
 Ensure that you have conda installed. In particular, this was verified on conda 22.9.0. This specific version can be installed with the following two commands:
 ```bash
 wget https://repo.anaconda.com/archive/Anaconda3-2022.10-Linux-x86_64.sh
-bash Anaconda3-2022.10-Linux-x86_64.sh```
+bash Anaconda3-2022.10-Linux-x86_64.sh
 ```
 Then create a new conda environment for the project using
 ```
