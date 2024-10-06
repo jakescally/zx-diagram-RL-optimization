@@ -4,15 +4,20 @@
  ## Setup/Installation
 
 Ensure that you have conda installed. In particular, this was verified on conda 22.9.0. This specific version can be installed with the following two commands:
-    wget https://repo.anaconda.com/archive/Anaconda3-2022.10-Linux-x86_64.sh
-    bash Anaconda3-2022.10-Linux-x86_64.sh```
-
+```bash
+wget https://repo.anaconda.com/archive/Anaconda3-2022.10-Linux-x86_64.sh
+bash Anaconda3-2022.10-Linux-x86_64.sh```
+```
 Then create a new conda environment for the project using
-    conda create --name env_name python=3.10
+```
+conda create --name env_name python=3.10
+```
 It must be on python version 3.10. Activate your env using ```conda activate env_name```. From within the conda environment and verify that you have pip version 24.2 installed using ```pip --version```. Also, you may want to install jupyter for this new conda environment. Do this by running ```conda install jupyter```.
 
 Clone or download the github repository into whatever folder you want. Navigate to that folder and run
-    pip install -r requirements.txt
+```
+pip install -r requirements.txt
+```
 This should install all of the necessary prerequisites.
 
 ## Provided Files
