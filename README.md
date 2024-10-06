@@ -12,7 +12,7 @@ Then create a new conda environment for the project using
 ```
 conda create --name env_name python=3.10
 ```
-It must be on python version 3.10. Activate your env using ```conda activate env_name```. From within the conda environment and verify that you have pip version 24.2 installed using ```pip --version```. Also, you may want to install jupyter for this new conda environment. Do this by running ```conda install jupyter```.
+It must be on python version 3.10. Activate your env using ```conda activate env_name```. From within the conda environment, verify that you have pip version 24.2 installed using ```pip --version```. Also, you may want to install jupyter for this new conda environment. Do this by running ```conda install jupyter```.
 
 Clone or download the github repository into whatever folder you want. Navigate to that folder and run
 ```
