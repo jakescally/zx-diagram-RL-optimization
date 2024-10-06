@@ -20,6 +20,8 @@ pip install -r requirements.txt
 ```
 This should install all of the necessary prerequisites.
 
+You will also need to create a folder called "results" in the same directory as the notebooks if you want to save the results and figures.
+
 ## Provided Files
 jake_gnn_v1 was the first "successful" model I created, but it only had access to some of the ZX actions. All this model really shows is that sometimes it is better to change the connections of the graph for further simplification in the long term instead of greedily fusing everything through. The v2 model is much more robust, allowing the agent to perform more ZX actions, as well as giving it the option of stopping. This one get's reasonably close to the leading pyzx simplification routine.
 
