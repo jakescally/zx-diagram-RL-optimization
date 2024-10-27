@@ -14,6 +14,11 @@ import time
 import datetime
 import sys
 
+# Set the number of threads PyTorch can use for CPU operations
+torch.set_num_threads(16)  # Set this to the number of threads you want to use
+
+# Optionally, set the number of interop threads (for inter-op parallelism)
+# torch.set_num_interop_threads(4)
 
 # misc checking functions
 
@@ -129,7 +134,6 @@ def color_change(g, v):
         return True
     else:
         return False
-    
 
 
 # graph representation class
@@ -316,6 +320,7 @@ class ZXEnv():
     
 
         zx.rules.apply_rule(self.g, zx.rules.remove_ids, zx.rules.match_ids_parallel(self.g))
+        zx.rules.apply_rule(self.g, zx.rules.remove_ids, zx.rules.match_ids_parallel(self.g))
         
         reward = past_node_count - len(self.g.vertices())
         self.current_step += 1
@@ -334,16 +339,6 @@ class ZXEnv():
         
     def close(self):
         pass        
-
-
-
-zx_graph = zx.generate.CNOT_HAD_PHASE_circuit(5,25).to_graph()
-test_env = ZXEnv(zx_graph,5,25)
-test_env.render()
-zx_rep = ZXGraphRepresentation(zx_graph)
-graph_data = zx_rep.get_graph_data()
-print(graph_data)
-
 
 # single gcn layer class
 class GCNLayer(torch.nn.Module):
@@ -396,22 +391,6 @@ class GCN(torch.nn.Module):
         return x
 
 
-# test out the model
-input_dim = 12 # feature vector
-hidden_dim = 16
-output_dim = 7 # possible actions [pivot, lcomp, bialg, fusion, supp, color, stop]
-num_layers = 4
-
-gcn_model = GCN(input_dim, hidden_dim, output_dim, num_layers=num_layers)
-
-zx_graph = zx.generate.CNOT_HAD_PHASE_circuit(3, 5).to_graph()
-zx_rep = ZXGraphRepresentation(zx_graph)
-graph_data = zx_rep.get_graph_data()
-
-node_embeddings = gcn_model(graph_data.x, graph_data.edge_index)
-print(node_embeddings)
-
-
 class GCNPolicyNetwork(torch.nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, num_layers):
         super(GCNPolicyNetwork, self).__init__()
@@ -431,12 +410,23 @@ def mask_logits(logits, zx_graph_rep: ZXGraphRepresentation):
     masked_logits = logits.masked_fill(action_features == 0, 0)
     return masked_logits
 
+def get_random_reward(env):
+    # get initial node count
+    start_node_count = len(env.g.vertices())
+    for step in env.MAX_STEPS:
+        valid_actions = env.possible_actions
+        random_action = random.choice(valid_actions)
+        env.step(random_action)
+    end_node_count = len(env.g.vertices())
+    return(start_node_count-end_node_count)
 
-def reinforce(env, policy_net, optimizer, num_episodes, name, gamma=0.99, verbose=False, save_results=True, comparative=False):
+def reinforce(env, policy_net, optimizer, num_episodes, name, gamma=0.99, verbose=False, save_results=True, comparative=False, policy_update_pct=1):
     # check if the folder exists first
     if save_results:
         directory = os.path.dirname(f"results/{name}/figs/")
         os.makedirs(directory)
+
+    
     
     num_qubits = env.num_qubits
     num_gates = env.num_gates
@@ -445,6 +435,10 @@ def reinforce(env, policy_net, optimizer, num_episodes, name, gamma=0.99, verbos
     
     results = []
     pyzx_results = []
+
+    rl_wins = 0
+    rl_ties = 0
+    rl_losses = 0
     
     for episode in range(num_episodes):
         state = ZXGraphRepresentation(env.reset())
@@ -556,6 +550,19 @@ def reinforce(env, policy_net, optimizer, num_episodes, name, gamma=0.99, verbos
                 done = True
                 #print(f"Done with episode {episode}")
 
+        if comparative:
+            rl_final_nodes = len(env.g.vertices())
+            rl_total_node_difference = original_verts - rl_final_nodes
+            if rl_total_node_difference > pyzx_reward:
+                rl_wins += 1
+            elif rl_total_node_difference == pyzx_reward:
+                rl_ties += 1
+            else:
+                rl_losses += 1
+        
+        if sum(rewards) == 0:
+            rewards.append(-1)
+        
         # compute the discounted rewards
         discounted_rewards = []
         R = 0
@@ -570,18 +577,19 @@ def reinforce(env, policy_net, optimizer, num_episodes, name, gamma=0.99, verbos
         else:
             # If there's only one or zero elements, just skip normalization
             discounted_rewards = discounted_rewards - discounted_rewards.mean()  # Center the rewards but no division by std
-        
-        
+
+        baseline = discounted_rewards.mean()
         # compute the policy loss
         policy_loss = []
         for log_prob, R in zip(log_probs, discounted_rewards):
-            policy_loss.append((-log_prob * R).reshape(1))
+            policy_loss.append((-log_prob * (R-baseline)).reshape(1))
         if len(policy_loss) > 0:
             policy_loss = torch.cat(policy_loss)
             # update the policy network
             optimizer.zero_grad()           # Clears the gradients from the previous iteration
             total_loss = policy_loss.sum()   # Sums all the individual losses
             total_loss.backward()            # Backpropagates the loss to compute gradients
+            torch.nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=1.0)
             optimizer.step()                 # Updates the policy network's weights using the optimizer        
             
             # monitor
@@ -590,6 +598,9 @@ def reinforce(env, policy_net, optimizer, num_episodes, name, gamma=0.99, verbos
                 print(f"EPISODE: {episode}, TOTAL REWARD: {total_reward}, TOTAL LOSS: {total_loss.item()}")
             results.append({
                 'episode': episode,
+                'rewards': rewards,
+                'log_probs': log_probs,
+                'policy_loss': policy_loss,
                 'total_reward': total_reward,
                 'total_loss': total_loss.item()
             })
@@ -628,22 +639,23 @@ def reinforce(env, policy_net, optimizer, num_episodes, name, gamma=0.99, verbos
     
         # Flush the output to ensure it is displayed immediately
         sys.stdout.flush()
-                
+
+    # note to self: add chosen action, possible actions, action probs...
+    
     # save results
     if save_results:
         torch.save(policy_net.state_dict(), f"results/{name}/{name}.pth")
         with open(f"results/{name}/training_progression.txt", 'w') as f:
             for entry in results:
-                f.write(f"Episode: {entry['episode']}, Total Reward: {entry['total_reward']}, Total Loss: {entry['total_loss']}\n")
+                f.write(f"Episode: {entry['episode']}, Rewards: {entry['rewards']}, Log Probs: {entry['log_probs']}, Total Reward: {entry['total_reward']}, Total Loss: {entry['total_loss']}\n")
 
         print(f"\nModel saved at results/{name}.")
     print("\n")
     if comparative:
+        print(f"Wins: {rl_wins}, Ties: {rl_ties}, Losses: {rl_losses}, Win rate: {rl_wins / num_episodes}, Tie rate: {rl_ties / num_episodes}")
         return results, pyzx_results
     else:
         return results
-
-
 
 
 # analyze the data
@@ -762,8 +774,6 @@ def create_plots(results, experiment_name, verbose=False, save_plots=True, compa
         plt.savefig(f"results/{experiment_name}/figs/lowess_centerline.png")
     if verbose:
         plt.show()
-
-
 
 def create_plots_comp(results, pyzx_results, experiment_name, verbose=False, save_plots=True):
     plt.ioff()
@@ -891,42 +901,4 @@ def create_plots_comp(results, pyzx_results, experiment_name, verbose=False, sav
         plt.savefig(f"results/{experiment_name}/figs/lowess_centerline_comparison.png")
     if verbose:
         plt.show()
-
-
-
-
-
-# set qubits and gates
-num_qubits = 30 # recommended at least 3. Default 5.
-num_gates = 100 # recommended at least 10. Default 30.     In general, do more qubits and gates.
-name_notes = "high_hidden_dim"
-# GNN Network parameters
-hidden_dim=24
-num_layers=6
-# REINFORCE parameters
-gamma = .99
-max_steps = 30
-num_episodes = 10000
-comparative = True
-save_results = True
-save_plots = True
-lr = 1e-3
-
-g = zx.generate.CNOT_HAD_PHASE_circuit(num_qubits, num_gates).to_graph()
-env = ZXEnv(g, num_qubits, num_gates, MAX_STEPS=max_steps) # 5,20
-policy_net = GCNPolicyNetwork(input_dim=12, hidden_dim=hidden_dim, output_dim=7, num_layers=num_layers) # do not change output_dim or input_dim!
-optimizer = optim.Adam(policy_net.parameters(), lr=lr)
-experiment_name = f"{name_notes}_{num_qubits}q_{num_gates}g"
-
-results = reinforce(env, policy_net, optimizer, name=experiment_name, num_episodes=num_episodes, gamma=gamma, verbose=False, save_results=save_results, comparative=comparative)
-if results:
-    print("done.")
-
-
-if not comparative:
-    create_plots(results, experiment_name, verbose=True, save_plots=save_plots)
-else:
-    create_plots_comp(results[0], results[1], experiment_name, verbose=True, save_plots=save_plots)
-
-
 
